@@ -1,0 +1,66 @@
+version: '3.9'
+
+services:
+  api: &main_app
+    build:
+      context: .
+      dockerfile: ./deploy/Dockerfile
+      target: prod
+    image: pandora:latest
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rmq:
+        condition: service_healthy
+
+  taskiq-worker:
+    <<: *main_app
+    ports: []
+    command:
+      - taskiq
+      - worker
+      - services.tasks:broker
+
+  taskiq-scheduler:
+    <<: *main_app
+    ports: []
+    command:
+      - taskiq
+      - scheduler
+      - services.tasks:scheduler
+
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_PASSWORD: "pandora"
+      POSTGRES_USER: "pandora"
+      POSTGRES_DB: "pandora"
+    volumes:
+    - pandora-db-data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: pg_isready -U pandora
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  rmq:
+    image: rabbitmq:latest
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+      RABBITMQ_DEFAULT_VHOST: "/"
+    healthcheck:
+      test: rabbitmq-diagnostics check_running -q
+      interval: 3s
+      timeout: 3s
+      retries: 50
+
+
+volumes:
+  pandora-db-data:
+    name: pandora-db-data
