@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - app-network
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: ./deploy/Dockerfile
+      target: prod
+    image: pandora:latest
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://pandora:pandora@db:5432/pandora
+    depends_on:
+      db:
+        condition: service_healthy
+      rmq:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  taskiq-worker:
+    build:
+      context: ./backend
+      dockerfile: ./deploy/Dockerfile
+      target: prod
+    image: pandora:latest
+    command:
+      - taskiq
+      - worker
+      - services.tasks:broker
+    depends_on:
+      - api
+    networks:
+      - app-network
+
+  taskiq-scheduler:
+    build:
+      context: ./backend
+      dockerfile: ./deploy/Dockerfile
+      target: prod
+    image: pandora:latest
+    command:
+      - taskiq
+      - scheduler
+      - services.tasks:scheduler
+    depends_on:
+      - api
+    networks:
+      - app-network
+
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_PASSWORD: "pandora"
+      POSTGRES_USER: "pandora"
+      POSTGRES_DB: "pandora"
+    volumes:
+      - pandora-db-data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: pg_isready -U pandora
+      interval: 2s
+      timeout: 3s
+      retries: 40
+    networks:
+      - app-network
+
+  rmq:
+    image: rabbitmq:latest
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+      RABBITMQ_DEFAULT_VHOST: "/"
+    healthcheck:
+      test: rabbitmq-diagnostics check_running -q
+      interval: 3s
+      timeout: 3s
+      retries: 50
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  pandora-db-data:
+    name: pandora-db-data 
